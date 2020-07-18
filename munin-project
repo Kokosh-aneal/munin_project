@@ -1,0 +1,245 @@
+					## MUNIN PROJECT ##
+
+========================================================================================================
+
+	1) Research o tworzeniu wirtualnych maszyn oraz instalacji CentOS'a
+
++Czytanie dokumentacji VBoxManage
+(po prostu stworzenie pliku, który można otwierać less'em "VBoxManage > vbox-man"
+
++Obsługa wirtualnej maszyny z terminala
+https://www.oracle.com/technical-resources/articles/it-infrastructure/admin-manage-vbox-cli.html
+
++Tworzenie wirtualnej maszyny w terminalu oraz dostęp do niej za pomocą rdesktop
+https://networking.ringofsaturn.com/Unix/Create_Virtual_Machine_VBoxManage.php
+
++Instalacja CentOS
+https://www.rootak.pl/blog/instalacja-systemu-centos-7/
+
++Różnice pomiędzy Linux a Stream
+https://teamquest.pl/blog/1400_centos-8-centos-stream
+
++Instalacja CentOS w vbox (graficznie, w gui vbox'a)
+https://linuxhint.com/install_centos8_virtualbox/
+
++Czym jest VDI
+https://en.wikipedia.org/wiki/Desktop_virtualization
+https://bitdefender.pl/bezpieczne-rozwiazania-vdi-jak-to-dziala/
+
+========================================================================================================
+
+	2) Przygotowanie wirtualnej maszyny do postawienia CentOS
+____________________
++Stworzenie wirtualnej maszyny w vbox
+:~# VBoxManage createvm --name CentOS --ostype Linux_64 --register
+____________________
++Ustawienie RAM'u (4096 MB ponieważ komputer na którym tworzona jest maszyna posiada 8GB pamięci RAM, poza tym tyle powinno w zupełności wystarczyć na serwer munina)
+:~# VBoxManage modifyvm CentOS --memory 4096 
+____________________
++Tutaj w poradniku tworzony jest ustawianie NIC na bridge, natomiast wydaje mi się, że dla samego systemu nie jest to konieczne na tym etapie tworzenia maszyny
++Można to później zmienić
+:~# VBoxManage modifyvm CentOS --bridgeadapter1 msk1
+:~# VBoxManage modifyvm CentOS --nic1 bridged
+[zmieniłem później na NAT, próba bez przekierowania portów podłączenia do maszyny]
+:~# VBoxManage modifyvm CentOS --bridgeadapter1 none
+:~# VBoxManage modifyvm CentOS --nic1 nat
+____________________
++Tworzenie "partycji" (obrazu dysku) dla tworzonej maszyny 
+:~# VBoxManage createhd --filename VirtualBox\ VMs/CentOS/CentOS.vdi --size 20000 --format VDI
+:~# VBoxManage storagectl CentOS --name "SATA Controller" --add sata --controller IntelAhci
+:~# VBoxManage storageattach CentOS --storagectl "SATA Controller" --port 0 --device 0 --type hdd --medium VirtualBox\ VMs/CentOS/CentOS.vdi
+____________________
++Mount pliku iso do maszyny wirtualnej
+:~# wget http://centos2.hti.pl/8.2.2004/isos/x86_64/CentOS-8.2.2004-x86_64-minimal.iso
+:~# VBoxManage storagectl CentOS --name "IDE Controller" --add ide --controller PIIX4
+:~# VBoxManage storageattach CentOS --storagectl "IDE Controller" --port 1 --device 0 --type dvddrive --medium /home/kuba/ISO/CentOS-8.2.2004-x86_64-minimal.iso
+____________________
++Umożliwienie pracy zdalnej na wirtualnej maszynie [np za pomocą programu rdesktop]
+:~# VBoxManage modifyvm CentOS --vrde on
+:~# VBoxManage modifyvm CentOS --vrdemulticon on --vrdeport 3390
+____________________
++Start maszyny i sprawdzenie czy wszystko działa poprawnie
+:~# VBoxHeadless --startvm CentOS
+[ na innym komputerze ]
+[ maszyna uruchamia się poprawnie, teraz trzeba nadać jej adres IP z zewnątrz, po którym będzie można się na nią zalogować ]
+:~# rdesktop 192.168.27.85:3390
+[ tutaj pojawia się problem, ponieważ na laptopie jest zainstalowany aktualny debian z aktualnym gnome'em ]
+[ na komputerze, na którym postawiona jest wirtualna maszyna z CentOS'em jest aktualny gnome, który z Wayland jako serwera wyświetlania ]
+[ powoduje to problemy, ponieważ serwer wayland nie jest przystosowany do zdalnej pracy np za pomocą rdesktop ]
+____________________
++Research o serwerach wayland i X
+https://pl.wikipedia.org/wiki/Wayland_(serwer_wyświetlania)
+https://pl.wikipedia.org/wiki/X_Window_System
+____________________
++Próba zmiany konfiguracji interfejsu sieciowego na mostek, dzięki czemu maszyna powinna dostać adres z DHCP, co umożliwi w miarę łatwy dostęp do niej
+:~# VBoxManage modifyvm CentOS --nic1 bridged
+:~# VBoxManage modifyvm CentOS --bridgeadapter1 enp0s25
+[ maszyna uruchamia się poprawnie, natomiast nie dostaje adresu, albo problem z urządzeniem nadającym adresy, albo z konfiguracją maszyny ] 
+____________________
++Instalacja środowiska graficznego xfce4 na debianie (wsl2) w celu przetestowania zdalnego łączenia się do maszyny
+:~# apt install xfce4
+[ tutaj używam wbudowanej aplikacji windowsa do połączenia z maszyną ]
+[ ! wszystko działa ! ]
+____________________
++Sprawdzenie możliwości łączenia się do wirtualnej maszyny poprzez adres hosta i odpowiedni port
+[ okazuje się, że w virtualbox hosta brakuje pakietów, które odpowiadają za zdalne łączenie się z vm ]
+[ research o ext-pack'u do vb oraz jego instalacji ]
+https://unix.stackexchange.com/questions/289685/how-to-install-virtualbox-extension-pack-to-virtualbox-latest-version-on-linux
+[ czy można po uruchomieniu maszyny dostać się do niej po ssh, aby zainstalować system w trybie tekstowym? ]
+____________________
++Aktualizacja vb oraz instalacja ext-pack'a do niego, który wzbogaca vb o możliwość zdalnej pracy
+[ instalowanie ext-pack'a zgodnie z linkiem na dole ]
+https://unix.stackexchange.com/questions/289685/how-to-install-virtualbox-extension-pack-to-virtualbox-latest-version-on-linux
+:~# LatestVirtualBoxVersion=$(wget -qO - https://download.virtualbox.org/virtualbox/LATEST-STABLE.TXT) && wget "https://download.virtualbox.org/virtualbox/${LatestVirtualBoxVersion}/Oracle_VM_VirtualBox_Extension_Pack-${LatestVirtualBoxVersion}.vbox-extpack"
+:~# vboxmanage extpack install /*path to extfile*/
+[ po instalacji ext-pack'a można się poprawnie połączyć z maszyną np za pomocą rdesktop ]
+:~# rdesktop /* hist_ip:3390 */
+[ pozostaje pytanie, czy można połączyć się z maszyną po ssh i uruchomić instalator tekstowo ]
+https://www.youtube.com/watch?v=QUnu-wz03f8&t=69s
+[ to chyba nie ma sensu, zostawiam w ten sposób i przejdę do instalacji centosa za pomocą rdesktop ]
+
+========================================================================================================
+
+	3) Instalacja CentOS
+____________________
++Do instalacji używam wbudowanego w windows narzędzia do zdalnego pulpitu (działa na zasadzie rdesktop)
+[ wybieram graficzną instalację i powoli przeklikuję wszystko ]
+[ podczas instalacji (pod koniec) pojawił się błąd chyba (akurat nie patrzyłem na ekran) i cały ekran został zastąpiony kolorowymi literami i podkreśleniami ]
+____________________
++Próba odłączenia wirtualnego napędu i uruchomienia "zainstalowanego" systemu
+____________________
++Wszystko zainstalowało się poprawnie, wystarczyło zbootować z dysku a nie z napędu
+____________________
++Zapoznanie się z podstawowymi funkcjami systemu
+____________________
++Po instalacji, system nadal bootuje się z ISO a nie z wirtualnego dysku, grub jest zainstalowany
+[ usunięcie "IDE Controller" zrobiło robotę, teraz trzeba skonfigurować gruba, aby system sam wstawał ]
+[ jednak grub był domyślnie zainstalowany i dobrze skonfigurowany ]
+____________________
++Konfiguracja interfejsu sieciowego oraz przekierowanie portów z komputera do vm, tak aby można było się logować do vm przez komputer
+[ przypisanie statycznego adresu IP maszynie, zmiana z DHCP ]
+[ research o nmcli, konfiguracji centos'a ]
+https://developer.gnome.org/NetworkManager/stable/nmcli.html
+https://linuxconfig.org/rhel-8-configure-static-ip-address
+https://computingforgeeks.com/change-ssh-port-centos-rhel-fedora-with-selinux/
+https://www.cyberciti.biz/faq/howto-setting-rhel7-centos-7-static-ip-configuration/
+[ port forwarding ]
+https://www.virtualbox.org/manual/ch06.html#natforward
+vboxmanage modifyvm CentOS
+	[--natpf<1-N> [<rulename>],tcp|udp,[<hostip>], <hostport>,[<guestip>],<guestport>]
+	[--natpf<1-N> delete <rulename>]
+:~# vboxmanage modifyvm CentOS --natpf1 guestssh,tcp,192.168.27.85,4444,10.0.2.15,22
+[ ustawienie nat'a w vbox automatycznie ustawia adres 10.0.2.15 co w sumie mi pasuje, nie zmieniam go ]
+____________________
++Czytanie o rpm
+:~# man rpm
+
+========================================================================================================
+
+	4) Instalacja oraz konfiguracja usługi Munin (serwer) na wirtualnej maszynie z systemem CentOS
+____________________
++Research o instalacji oraz konfiguracji munina
+https://www.youtube.com/watch?v=8P2EpoUIkqs&t=326s
+https://www.youtube.com/watch?v=-oHJFZz5h1Y
+https://www.redhat.com/en/blog/whats-epel-and-how-do-i-use-it
+https://www.tecmint.com/install-munin-network-monitoring-in-rhel-centos-fedora/
+https://bugzilla.redhat.com/show_bug.cgi?id=1629438
+____________________
++Aby zacząć instalację munina, najpierw potrzebny jest epel
+:~# dnf install epel-release
+____________________
++Następnie można zabrać się za instalację munina (i apache2 oczywiście)
+:~# dnf install munin munin-node httpd
+[ podczas instalacji munina pojawia się następujący problem ]
+	[root@munin-server ~]# dnf install munin
+	Ostatnio sprawdzono ważność metadanych: 1:07:03 temu w dniu czw, 16 lip 2020, 21:04:16.
+	Błąd:
+	 Problem: conflicting requests
+	  - nothing provides perl(DateTime) needed by munin-2.0.54-2.el8.noarch
+	  - nothing provides perl(Params::Validate) needed by munin-2.0.54-2.el8.noarch
+	  - nothing provides perl(File::Copy::Recursive) needed by munin-2.0.54-2.el8.noarch
+	  - nothing provides perl(Taint::Runtime) needed by munin-2.0.54-2.el8.noarch
+	(dodanie „--skip-broken” pominie pakiety, których nie można zainstalować lub „--nobest” spowoduje użycie nie tylko najlepszych kandydatów)
+[ dodanie flag --skip-broken czy --nobest absolutnie nie rozwiązuje problemu ]
+[ próby znalezienia podobnego problemu w internecie ]
+https://bugzilla.redhat.com/show_bug.cgi?id=891763
+https://bugzilla.redhat.com/show_bug.cgi?id=1512016
+https://bugzilla.redhat.com/show_bug.cgi?id=1629438
+https://metacpan.org/pod/DateTime
+https://src.fedoraproject.org/rpms/munin/blob/master/f/munin.spec
+:~# man dnf
+:~# man rpm
+https://www.tecmint.com/install-perl-modules-using-cpan-on-centos/
+https://stackoverflow.com/questions/58307728/how-to-install-the-perl-datetime-module-under-centos8-yum-install-perldatetim <=== ZNALEZIONE
+[ perl-DateTime is no longer part of the CentOS 8 base OS. You'll need to enable the PowerTools repository, i.e. as root ]
+[ czyli rozwiązanie problemu to ]
+:~# dnf config-manager --set-enabled PowerTools
+:~# dnf update
+:~# dnf repolist
+:~# dnf install "perl(DateTime)"
+[ po pojawia się możliwość normalnej instalacji munina ]
+:~# dnf install munin -y
+____________________
++Uruchomienie oraz konfiguracja serwera www oraz munina
+:~# systemctl enable munin-node
+:~# systemctl start munin-node
+:~# vim /etc/munin/munin.conf
+[ w tym pliku trzeba odkomentować następujące linijki ]
+dbdir     /var/lib/munin
+htmldir   /var/www/html/munin
+logdir    /var/log/munin
+rundir    /var/run/munin
+[ a następnie ustawić adres ]
+[localhost]
+address 10.0.2.15
+use_node_name yes
+[ w tym momencie wypadałoby skonfigurować serwer www, niestety problemem może być brak domyślnego configu (brak wsparcia dla CentOS 8 na ten moment) ]
+[ konfiguracja serwera www ]
+:~# vim /etc/httpd/conf.d/munin.conf
+<Directory /var/www/html/munin/>
+Order Deny,Allow
+Allow from all
+</Directory>
+[ następnie trzeba przekierować porty z komputera na vm ]
+:~# vboxmanage modifyvm CentOS --natpf1 munin_server,tcp,192.168.27.85,80,10.0.2.15,80
+[ to niestety nie działa po nieważ zykły użytkownik nie może używać portów niższych niż 1024 ]
+:~# vboxmanage modifyvm CentOS --natpf1 munin_server,tcp,192.168.27.85,1080,10.0.2.15,80
+[ w tym miejscu pojawia się mnóstwo różnych dziwnych problemów to znaczy:
+	-SELinux blokuje munina
+	-brak domyślnych configów (z tego co udało mi się wyczytać to są uroki CentOS'a, który dostarcza munina w wersji zrób-to-sam)
+	-brak integracji z chrony ]
+[ rozwiązanie (kiepskie) problemu z SELinux może wyglądać tak ]
+:~# sestatus
+:~# setenforce 0
+[ natomiast jest to słabe rozwiązanie, ponieważ to wyłącza sel, co nie jest działaniem pożądanym ]
+[ ostatecznie konfiguracja serwera www wygląda tak ] 
+Alias /munin /var/www/html/munin
+<directory /var/www/html/munin/>
+Options FollowSymLinks
+AllowOverride All
+Order allow,deny
+Allow from all
+</directory>
+ScriptAlias /munin-cgi/munin-cgi-graph /var/www/html/munin/cgi/munin-cgi-graph
+____________________
++Brak integracji z cron'em - stworzenie i dopisanie poniższej konfiguracji
+#
+# cron-jobs for munin
+#
+
+MAILTO=root
+
+*/5 * * * *     munin if [ -x /usr/bin/munin-cron ]; then /usr/bin/munin-cron; fi
+14 10 * * *     munin if [ -x /usr/share/munin/munin-limits ]; then /usr/share/munin/munin-limits --force --contact nagios --contact old-nagios; fi
+
+# remove stale generated html and graph files (e.g. disabled plugins or fields with volatile names)
+27 03 * * *     munin if [ -d /var/cache/munin/www ]; then find /var/cache/munin/www/ -type f -name "*.html" -mtime +30 -delete; find /var/cache/munin/www/ -mindepth 1 -type d -empty -delete; fi
+32 03 * * *     www-data if [ -d /var/lib/munin/cgi-tmp ]; then find /var/lib/munin/cgi-tmp/ -type f -mtime +1 -delete; find /var/lib/munin/cgi-tmp/ -mindepth 1 -type d -empty -delete; fi
+
+
+========================================================================================================
+
+	5) Instalacja oraz konfiguracja usługi Munin (klient) na laptopie
+
+========================================================================================================
+
